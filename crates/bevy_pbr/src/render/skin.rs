@@ -14,7 +14,7 @@ use bevy_transform::prelude::GlobalTransform;
 use bevy_utils::EntityHashMap;
 
 /// Maximum number of joints supported for skinned meshes.
-pub const MAX_JOINTS: usize = 256;
+pub const MAX_JOINTS: usize = 512;
 
 #[derive(Component)]
 pub struct SkinIndex {

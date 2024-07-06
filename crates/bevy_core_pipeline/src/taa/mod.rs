@@ -1,5 +1,5 @@
 use crate::{
-    core_3d::{self, CORE_3D},
+    core_3d::graph::{Core3d, Node3d},
     fullscreen_vertex_shader::fullscreen_shader_vertex_state,
     prelude::Camera3d,
     prepass::{DepthPrepass, MotionVectorPrepass, ViewPrepassTextures},
@@ -35,13 +35,6 @@ use bevy_render::{
     ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
 };
 
-pub mod draw_3d_graph {
-    pub mod node {
-        /// Label for the TAA render node.
-        pub const TAA: &str = "taa";
-    }
-}
-
 const TAA_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(656865235226276);
 
 /// Plugin for temporal anti-aliasing. Disables multisample anti-aliasing (MSAA).
@@ -56,10 +49,9 @@ impl Plugin for TemporalAntiAliasPlugin {
         app.insert_resource(Msaa::Off)
             .register_type::<TemporalAntiAliasSettings>();
 
-        let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
-
         render_app
             .init_resource::<SpecializedRenderPipelines<TaaPipeline>>()
             .add_systems(ExtractSchedule, extract_taa_settings)
@@ -71,23 +63,21 @@ impl Plugin for TemporalAntiAliasPlugin {
                     prepare_taa_history_textures.in_set(RenderSet::PrepareResources),
                 ),
             )
-            .add_render_graph_node::<ViewNodeRunner<TemporalAntiAliasNode>>(
-                CORE_3D,
-                draw_3d_graph::node::TAA,
-            )
+            .add_render_graph_node::<ViewNodeRunner<TemporalAntiAliasNode>>(Core3d, Node3d::Taa)
             .add_render_graph_edges(
-                CORE_3D,
-                &[
-                    core_3d::graph::node::END_MAIN_PASS,
-                    draw_3d_graph::node::TAA,
-                    core_3d::graph::node::BLOOM,
-                    core_3d::graph::node::TONEMAPPING,
-                ],
+                Core3d,
+                (
+                    Node3d::EndMainPass,
+                    Node3d::MotionBlur, // Running before TAA reduces edge artifacts and noise
+                    Node3d::Taa,
+                    Node3d::Bloom,
+                    Node3d::Tonemapping,
+                ),
             );
     }
 
     fn finish(&self, app: &mut App) {
-        let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
@@ -96,7 +86,7 @@ impl Plugin for TemporalAntiAliasPlugin {
 }
 
 /// Bundle to apply temporal anti-aliasing.
-#[derive(Bundle, Default)]
+#[derive(Bundle, Default, Clone)]
 pub struct TemporalAntiAliasBundle {
     pub settings: TemporalAntiAliasSettings,
     pub jitter: TemporalJitter,
@@ -134,8 +124,6 @@ pub struct TemporalAntiAliasBundle {
 ///
 /// [Currently](https://github.com/bevyengine/bevy/issues/8423) cannot be used with [`bevy_render::camera::OrthographicProjection`].
 ///
-/// Currently does not support skinned meshes and morph targets.
-/// There will probably be ghosting artifacts if used with them.
 /// Does not work well with alpha-blended meshes as it requires depth writing to determine motion.
 ///
 /// It is very important that correct motion vectors are written for everything on screen.
@@ -206,8 +194,8 @@ impl ViewNode for TemporalAntiAliasNode {
             &BindGroupEntries::sequential((
                 view_target.source,
                 &taa_history_textures.read.default_view,
-                &prepass_motion_vectors_texture.default_view,
-                &prepass_depth_texture.default_view,
+                &prepass_motion_vectors_texture.texture.default_view,
+                &prepass_depth_texture.texture.default_view,
                 &pipelines.nearest_sampler,
                 &pipelines.linear_sampler,
             )),
@@ -229,6 +217,8 @@ impl ViewNode for TemporalAntiAliasNode {
                     }),
                 ],
                 depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
             });
             taa_pass.set_render_pipeline(taa_pipeline);
             taa_pass.set_bind_group(0, &taa_bind_group, &[]);

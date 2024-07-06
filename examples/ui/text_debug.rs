@@ -1,9 +1,10 @@
 //! Shows various text layout options.
 
 use bevy::{
+    color::palettes::css::*,
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     prelude::*,
-    window::{PresentMode, WindowPlugin},
+    window::PresentMode,
 };
 
 fn main() {
@@ -35,7 +36,6 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                 width: Val::Percent(100.),
                 height: Val::Percent(100.),
                 justify_content: JustifyContent::SpaceBetween,
-
                 ..default()
             },
             ..default()
@@ -67,7 +67,7 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                 "This text is right-justified. The `JustifyText` component controls the horizontal alignment of the lines of multi-line text relative to each other, and does not affect the text node's position in the UI layout.",                TextStyle {
                     font: font.clone(),
                     font_size: 30.0,
-                    color: Color::YELLOW,
+                    color: YELLOW.into(),
                 },
             )
             .with_text_justify(JustifyText::Right)
@@ -82,7 +82,7 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextStyle {
                     font: font.clone(),
                     font_size: 30.0,
-                    color: Color::WHITE,
+                    ..default()
                 },
             )
             .with_style(Style {
@@ -109,7 +109,7 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextStyle {
                     font: font.clone(),
                     font_size: 40.0,
-                    color: Color::rgb(0.8, 0.2, 0.7),
+                    color: Color::srgb(0.8, 0.2, 0.7),
                 },
             )
             .with_text_justify(JustifyText::Center)
@@ -125,10 +125,26 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextStyle {
                     font: font.clone(),
                     font_size: 35.0,
-                    color: Color::YELLOW,
+                    color: YELLOW.into(),
                 },
             )
             .with_text_justify(JustifyText::Left)
+            .with_style(Style {
+                max_width: Val::Px(300.),
+                ..default()
+            }),
+        );
+
+        builder.spawn(
+            TextBundle::from_section(
+                "This text is fully justified and is positioned in the same way.",
+                TextStyle {
+                    font: font.clone(),
+                    font_size: 35.0,
+                    color: GREEN_YELLOW.into(),
+                },
+            )
+            .with_text_justify(JustifyText::Justified)
             .with_style(Style {
                 max_width: Val::Px(300.),
                 ..default()
@@ -142,7 +158,15 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                     TextStyle {
                         font: font.clone(),
                         font_size: 25.0,
-                        color: Color::WHITE,
+                        ..default()
+                    },
+                ),
+                TextSection::new(
+                    " this text has zero fontsize",
+                    TextStyle {
+                        font: font.clone(),
+                        font_size: 0.0,
+                        color: BLUE.into(),
                     },
                 ),
                 TextSection::new(
@@ -150,33 +174,41 @@ fn infotext_system(mut commands: Commands, asset_server: Res<AssetServer>) {
                     TextStyle {
                         font: font.clone(),
                         font_size: 25.0,
-                        color: Color::RED,
+                        color: RED.into(),
                     },
                 ),
                 TextSection::from_style(TextStyle {
                     font: font.clone(),
                     font_size: 25.0,
-                    color: Color::ORANGE_RED,
+                    color: ORANGE_RED.into(),
                 }),
                 TextSection::new(
                     " fps, ",
                     TextStyle {
                         font: font.clone(),
-                        font_size: 25.0,
-                        color: Color::YELLOW,
+                        font_size: 12.0,
+                        color: YELLOW.into(),
                     },
                 ),
                 TextSection::from_style(TextStyle {
                     font: font.clone(),
                     font_size: 25.0,
-                    color: Color::GREEN,
+                    color: LIME.into(),
                 }),
                 TextSection::new(
                     " ms/frame",
                     TextStyle {
                         font: font.clone(),
-                        font_size: 25.0,
-                        color: Color::BLUE,
+                        font_size: 50.0,
+                        color: BLUE.into(),
+                    },
+                ),
+                TextSection::new(
+                    " this text has negative fontsize",
+                    TextStyle {
+                        font: font.clone(),
+                        font_size: -50.0,
+                        color: BLUE.into(),
                     },
                 ),
             ]),
@@ -197,14 +229,15 @@ fn change_text_system(
 ) {
     for mut text in &mut query {
         let mut fps = 0.0;
-        if let Some(fps_diagnostic) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
+        if let Some(fps_diagnostic) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
             if let Some(fps_smoothed) = fps_diagnostic.smoothed() {
                 fps = fps_smoothed;
             }
         }
 
         let mut frame_time = time.delta_seconds_f64();
-        if let Some(frame_time_diagnostic) = diagnostics.get(FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        if let Some(frame_time_diagnostic) =
+            diagnostics.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         {
             if let Some(frame_time_smoothed) = frame_time_diagnostic.smoothed() {
                 frame_time = frame_time_smoothed;
@@ -215,8 +248,8 @@ fn change_text_system(
             "This text changes in the bottom right - {fps:.1} fps, {frame_time:.3} ms/frame",
         );
 
-        text.sections[2].value = format!("{fps:.1}");
+        text.sections[3].value = format!("{fps:.1}");
 
-        text.sections[4].value = format!("{frame_time:.3}");
+        text.sections[5].value = format!("{frame_time:.3}");
     }
 }

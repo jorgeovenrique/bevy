@@ -1,11 +1,12 @@
+use crate::func::macros::impl_function_traits;
 use crate::{
-    self as bevy_reflect, utility::reflect_hasher, Reflect, ReflectMut, ReflectOwned, ReflectRef,
-    TypeInfo, TypePath, TypePathTable,
+    self as bevy_reflect, utility::reflect_hasher, ApplyError, Reflect, ReflectKind, ReflectMut,
+    ReflectOwned, ReflectRef, TypeInfo, TypePath, TypePathTable,
 };
 use bevy_reflect_derive::impl_type_path;
 use std::{
     any::{Any, TypeId},
-    fmt::Debug,
+    fmt::{Debug, Formatter},
     hash::{Hash, Hasher},
 };
 
@@ -69,7 +70,7 @@ pub trait Array: Reflect {
     fn clone_dynamic(&self) -> DynamicArray {
         DynamicArray {
             represented_type: self.get_represented_type_info(),
-            values: self.iter().map(|value| value.clone_value()).collect(),
+            values: self.iter().map(Reflect::clone_value).collect(),
         }
     }
 }
@@ -262,10 +263,19 @@ impl Reflect for DynamicArray {
         array_apply(self, value);
     }
 
+    fn try_apply(&mut self, value: &dyn Reflect) -> Result<(), ApplyError> {
+        array_try_apply(self, value)
+    }
+
     #[inline]
     fn set(&mut self, value: Box<dyn Reflect>) -> Result<(), Box<dyn Reflect>> {
         *self = value.take()?;
         Ok(())
+    }
+
+    #[inline]
+    fn reflect_kind(&self) -> ReflectKind {
+        ReflectKind::Array
     }
 
     #[inline]
@@ -295,6 +305,12 @@ impl Reflect for DynamicArray {
 
     fn reflect_partial_eq(&self, value: &dyn Reflect) -> Option<bool> {
         array_partial_eq(self, value)
+    }
+
+    fn debug(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DynamicArray(")?;
+        array_debug(self, f)?;
+        write!(f, ")")
     }
 
     #[inline]
@@ -343,6 +359,7 @@ impl Array for DynamicArray {
 }
 
 impl_type_path!((in bevy_reflect) DynamicArray);
+impl_function_traits!(DynamicArray);
 /// An iterator over an [`Array`].
 pub struct ArrayIter<'a> {
     array: &'a dyn Array,
@@ -363,7 +380,7 @@ impl<'a> Iterator for ArrayIter<'a> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.array.get(self.index);
-        self.index += 1;
+        self.index += value.is_some() as usize;
         value
     }
 
@@ -408,6 +425,38 @@ pub fn array_apply<A: Array>(array: &mut A, reflect: &dyn Reflect) {
     } else {
         panic!("Attempted to apply a non-`Array` type to an `Array` type.");
     }
+}
+
+/// Tries to apply the reflected [array](Array) data to the given [array](Array) and
+/// returns a Result.
+///
+/// # Errors
+///
+/// * Returns an [`ApplyError::DifferentSize`] if the two arrays have differing lengths.
+/// * Returns an [`ApplyError::MismatchedKinds`] if the reflected value is not a
+///   [valid array](ReflectRef::Array).
+/// * Returns any error that is generated while applying elements to each other.
+///
+#[inline]
+pub fn array_try_apply<A: Array>(array: &mut A, reflect: &dyn Reflect) -> Result<(), ApplyError> {
+    if let ReflectRef::Array(reflect_array) = reflect.reflect_ref() {
+        if array.len() != reflect_array.len() {
+            return Err(ApplyError::DifferentSize {
+                from_size: reflect_array.len(),
+                to_size: array.len(),
+            });
+        }
+        for (i, value) in reflect_array.iter().enumerate() {
+            let v = array.get_mut(i).unwrap();
+            v.try_apply(value)?;
+        }
+    } else {
+        return Err(ApplyError::MismatchedKinds {
+            from_kind: reflect.reflect_kind(),
+            to_kind: ReflectKind::Array,
+        });
+    }
+    Ok(())
 }
 
 /// Compares two [arrays](Array) (one concrete and one reflected) to see if they
@@ -455,4 +504,33 @@ pub fn array_debug(dyn_array: &dyn Array, f: &mut std::fmt::Formatter<'_>) -> st
         debug.entry(&item as &dyn Debug);
     }
     debug.finish()
+}
+#[cfg(test)]
+mod tests {
+    use crate::{Reflect, ReflectRef};
+    #[test]
+    fn next_index_increment() {
+        const SIZE: usize = if cfg!(debug_assertions) {
+            4
+        } else {
+            // If compiled in release mode, verify we dont overflow
+            usize::MAX
+        };
+
+        let b = Box::new([(); SIZE]).into_reflect();
+
+        let ReflectRef::Array(array) = b.reflect_ref() else {
+            panic!("Not an array...");
+        };
+
+        let mut iter = array.iter();
+        iter.index = SIZE - 1;
+        assert!(iter.next().is_some());
+
+        // When None we should no longer increase index
+        assert!(iter.next().is_none());
+        assert!(iter.index == SIZE);
+        assert!(iter.next().is_none());
+        assert!(iter.index == SIZE);
+    }
 }

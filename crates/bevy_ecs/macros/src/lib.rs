@@ -1,15 +1,16 @@
+// FIXME(3492): remove once docs are ready
+#![allow(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 extern crate proc_macro;
 
 mod component;
+mod query_data;
+mod query_filter;
 mod states;
 mod world_query;
-mod world_query_data;
-mod world_query_filter;
 
-use crate::{
-    world_query_data::derive_world_query_data_impl,
-    world_query_filter::derive_world_query_filter_impl,
-};
+use crate::{query_data::derive_query_data_impl, query_filter::derive_query_filter_impl};
 use bevy_macro_utils::{derive_label, ensure_no_collision, get_struct_fields, BevyManifest};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -73,6 +74,7 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let mut field_component_ids = Vec::new();
+    let mut field_get_component_ids = Vec::new();
     let mut field_get_components = Vec::new();
     let mut field_from_components = Vec::new();
     for (((i, field_type), field_kind), field) in field_type
@@ -85,6 +87,9 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
             BundleFieldKind::Component => {
                 field_component_ids.push(quote! {
                 <#field_type as #ecs_path::bundle::Bundle>::component_ids(components, storages, &mut *ids);
+                });
+                field_get_component_ids.push(quote! {
+                    <#field_type as #ecs_path::bundle::Bundle>::get_component_ids(components, &mut *ids);
                 });
                 match field {
                     Some(field) => {
@@ -130,6 +135,13 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
                 ids: &mut impl FnMut(#ecs_path::component::ComponentId)
             ){
                 #(#field_component_ids)*
+            }
+
+            fn get_component_ids(
+                components: &#ecs_path::component::Components,
+                ids: &mut impl FnMut(Option<#ecs_path::component::ComponentId>)
+            ){
+                #(#field_get_component_ids)*
             }
 
             #[allow(unused_variables, non_snake_case)]
@@ -211,6 +223,8 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 type State = (#(#param::State,)*);
                 type Item<'w, 's> = ParamSet<'w, 's, (#(#param,)*)>;
 
+                // Note: We allow non snake case so the compiler don't complain about the creation of non_snake_case variables
+                #[allow(non_snake_case)]
                 fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
                     #(
                         // Pretend to add each param to the system alone, see if it conflicts
@@ -218,6 +232,7 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                         #meta.component_access_set.clear();
                         #meta.archetype_component_access.clear();
                         #param::init_state(world, &mut #meta);
+                        // The variable is being defined with non_snake_case here
                         let #param = #param::init_state(world, &mut system_meta.clone());
                     )*
                     // Make the ParamSet non-send if any of its parameters are non-send.
@@ -235,8 +250,9 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                     (#(#param,)*)
                 }
 
-                fn new_archetype(state: &mut Self::State, archetype: &Archetype, system_meta: &mut SystemMeta) {
-                    <(#(#param,)*) as SystemParam>::new_archetype(state, archetype, system_meta);
+                unsafe fn new_archetype(state: &mut Self::State, archetype: &Archetype, system_meta: &mut SystemMeta) {
+                    // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
+                    unsafe { <(#(#param,)*) as SystemParam>::new_archetype(state, archetype, system_meta); }
                 }
 
                 fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
@@ -421,12 +437,17 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
                     }
                 }
 
-                fn new_archetype(state: &mut Self::State, archetype: &#path::archetype::Archetype, system_meta: &mut #path::system::SystemMeta) {
-                    <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::new_archetype(&mut state.state, archetype, system_meta)
+                unsafe fn new_archetype(state: &mut Self::State, archetype: &#path::archetype::Archetype, system_meta: &mut #path::system::SystemMeta) {
+                    // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
+                    unsafe { <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::new_archetype(&mut state.state, archetype, system_meta) }
                 }
 
                 fn apply(state: &mut Self::State, system_meta: &#path::system::SystemMeta, world: &mut #path::world::World) {
                     <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::apply(&mut state.state, system_meta, world);
+                }
+
+                fn queue(state: &mut Self::State, system_meta: &#path::system::SystemMeta, world: #path::world::DeferredWorld) {
+                    <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::queue(&mut state.state, system_meta, world);
                 }
 
                 unsafe fn get_param<'w, 's>(
@@ -450,16 +471,16 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
     })
 }
 
-/// Implement `WorldQueryData` to use a struct as a data parameter in a query
-#[proc_macro_derive(WorldQueryData, attributes(world_query_data))]
-pub fn derive_world_query_data(input: TokenStream) -> TokenStream {
-    derive_world_query_data_impl(input)
+/// Implement `QueryData` to use a struct as a data parameter in a query
+#[proc_macro_derive(QueryData, attributes(query_data))]
+pub fn derive_query_data(input: TokenStream) -> TokenStream {
+    derive_query_data_impl(input)
 }
 
-/// Implement `WorldQueryFilter` to use a struct as a filter parameter in a query
-#[proc_macro_derive(WorldQueryFilter, attributes(world_query_filter))]
-pub fn derive_world_query_filter(input: TokenStream) -> TokenStream {
-    derive_world_query_filter_impl(input)
+/// Implement `QueryFilter` to use a struct as a filter parameter in a query
+#[proc_macro_derive(QueryFilter, attributes(query_filter))]
+pub fn derive_query_filter(input: TokenStream) -> TokenStream {
+    derive_query_filter_impl(input)
 }
 
 /// Derive macro generating an impl of the trait `ScheduleLabel`.
@@ -475,7 +496,7 @@ pub fn derive_schedule_label(input: TokenStream) -> TokenStream {
         .segments
         .push(format_ident!("ScheduleLabel").into());
     dyn_eq_path.segments.push(format_ident!("DynEq").into());
-    derive_label(input, "ScheduleName", &trait_path, &dyn_eq_path)
+    derive_label(input, "ScheduleLabel", &trait_path, &dyn_eq_path)
 }
 
 /// Derive macro generating an impl of the trait `SystemSet`.
@@ -514,4 +535,9 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(States)]
 pub fn derive_states(input: TokenStream) -> TokenStream {
     states::derive_states(input)
+}
+
+#[proc_macro_derive(SubStates, attributes(source))]
+pub fn derive_substates(input: TokenStream) -> TokenStream {
+    states::derive_substates(input)
 }

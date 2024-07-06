@@ -30,7 +30,7 @@ fn draw_cursor(
 
     // Calculate if and where the ray is hitting the ground plane.
     let Some(distance) =
-        ray.intersect_plane(ground.translation(), primitives::Plane3d::new(ground.up()))
+        ray.intersect_plane(ground.translation(), InfinitePlane3d::new(ground.up()))
     else {
         return;
     };
@@ -51,8 +51,8 @@ fn setup(
     // plane
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(shape::Plane::from_size(20.).into()),
-            material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+            mesh: meshes.add(Plane3d::default().mesh().size(20., 20.)),
+            material: materials.add(Color::srgb(0.3, 0.5, 0.3)),
             ..default()
         },
         Ground,
